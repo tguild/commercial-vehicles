@@ -1,0 +1,167 @@
+# COVESA VSS overlay — proposed signals for fleet data points that VSS cannot carry
+# and that should NOT be derived by consumers.
+# Companion to tmp/fmd-vss-gaps/README.md, the Fleet Management Data sheet (v4.6) and the
+# an OEM partner's VSS mapping review (Nov 2026).
+# Base: VSS master after 6.1 (includes ACEA FMS v5, PR #932; checked at 9dd09ad8).
+# Apply with vss-tools: --overlays tmp/fmd-vss-gaps/fmd-gaps.vspec
+# Status: PROPOSAL for discussion in the COVESA Commercial and Fleet Vehicle Group; not adopted.
+#
+# Selection rule: a value is proposed only if at least one holds —
+#   (1) the ECU computes it from information not exposed elsewhere in VSS,
+#   (2) it is a lifetime counter a later-installed or intermittently connected consumer cannot rebuild,
+#   (3) regulation already fixes its meaning,
+#   (4) it is safety-critical or claim-relevant, so a heuristic is not acceptable,
+#   (5) deriving it needs high-rate or bulky inputs.
+# Values that can be derived cheaply from existing signals are documented as derivation rules
+# in README.md instead.
+
+#
+# Collision — OEM partner crash type signal; FNOL / emergency dispatch
+#
+Vehicle.Safety.CollisionType:
+  datatype: string
+  type: sensor
+  allowed: ['UNKNOWN', 'NONE', 'FRONT', 'REAR', 'LEFT', 'RIGHT', 'ROLLOVER', 'MULTIPLE']
+  description: Principal direction of the most recent collision detected by the vehicle.
+  comment: Determined by the restraint control module from its crash sensors. NONE indicates no collision detected in
+           the current power cycle. MULTIPLE indicates more than one impact direction in the same event. Complements
+           Vehicle.Safety.Rollover. Rules (1), (4), (5). Primary consumers - emergency dispatch, first notice of loss.
+
+#
+# Traction battery thermal event — OEM partner battery fire alarm
+#
+Vehicle.Powertrain.TractionBattery.ThermalEventState:
+  datatype: string
+  type: sensor
+  allowed: ['UNKNOWN', 'NONE', 'RISK', 'DETECTED']
+  description: Indicates whether the traction battery is at risk of, or has detected, a thermal event.
+  comment: Determined by the battery management system (e.g. temperature, voltage, gas or pressure sensing). UN GTR 20
+           requires a warning to occupants for a thermal event, so the state already exists in vehicles. Earlier warning
+           than Vehicle.Safety.IsFire. Rules (1), (3), (4).
+
+#
+# Aftertreatment — FMD "DPF regen status"; OEM partner DPF warning
+#
+Vehicle.Powertrain.CombustionEngine.DieselParticulateFilter.RegenerationStatus:
+  datatype: string
+  type: sensor
+  allowed: ['NOT_ACTIVE', 'ACTIVE', 'NEEDED']
+  description: State of diesel particulate filter regeneration.
+  comment: NEEDED = regeneration required but not running (e.g. parked regeneration pending). Corresponds to J1939
+           SPN 3700. A temperature heuristic cannot distinguish passive from active regeneration or detect NEEDED. Rule (1).
+
+Vehicle.Powertrain.CombustionEngine.DieselParticulateFilter.SootLoad:
+  datatype: uint8
+  type: sensor
+  unit: percent
+  min: 0
+  max: 100
+  description: Soot load of the diesel particulate filter, relative to the regeneration threshold.
+  comment: Corresponds to J1939 SPN 3719. DeltaPressure alone is not a reliable proxy because it depends on exhaust
+           flow. Rule (1).
+
+#
+# DEF — OEM partner AdBlue text warnings; FMD "Aftertreatment fuel used"
+#
+Vehicle.Powertrain.CombustionEngine.DieselExhaustFluid.TotalConsumption:
+  datatype: double
+  type: sensor
+  unit: l
+  min: 0
+  description: Diesel exhaust fluid consumed since the vehicle was built.
+  comment: Reported from the dosing control, not from tank level (level is coarse and affected by refills and slosh).
+           The DEF-to-fuel ratio is a common indicator of emission-system tampering. Rules (1), (2).
+
+Vehicle.Powertrain.CombustionEngine.DieselExhaustFluid.Inducement:
+  type: branch
+  description: Driver inducement system for the selective catalytic reduction (SCR) emission control.
+
+Vehicle.Powertrain.CombustionEngine.DieselExhaustFluid.Inducement.Level:
+  datatype: string
+  type: sensor
+  allowed: ['UNKNOWN', 'NONE', 'WARNING', 'LOW_LEVEL', 'SEVERE']
+  description: Current stage of the driver inducement system.
+  comment: WARNING = driver warning only. LOW_LEVEL = performance restriction (e.g. torque reduction). SEVERE = severe
+           restriction (e.g. speed limit or no restart). Stages and thresholds are defined by emission regulation and may
+           differ by market. Rules (1), (3).
+
+Vehicle.Powertrain.CombustionEngine.DieselExhaustFluid.Inducement.Reasons:
+  datatype: string[]
+  type: sensor
+  allowed: ['DEF_LEVEL', 'DEF_QUALITY', 'DOSING_INTERRUPTION', 'CONSUMPTION_DEVIATION', 'EGR_VALVE', 'MONITORING_FAILURE', 'OTHER']
+  description: Reasons currently causing the inducement warning or restriction.
+  comment: Replaces per-reason driver text messages with one list. Empty when Level is NONE.
+
+Vehicle.Powertrain.CombustionEngine.DieselExhaustFluid.Inducement.DistanceToRestriction:
+  datatype: uint32
+  type: sensor
+  unit: m
+  description: Remaining distance before the next inducement stage takes effect.
+
+Vehicle.Powertrain.CombustionEngine.DieselExhaustFluid.Inducement.TimeToRestriction:
+  datatype: uint32
+  type: sensor
+  unit: s
+  description: Remaining engine operating time before the next inducement stage takes effect.
+
+#
+# Idle fuel — FMD "Total fuel used while idling", "Idling hydrogen fuel used"
+#
+Vehicle.Powertrain.FuelSystem.TotalIdleConsumption:
+  datatype: double
+  type: sensor
+  unit: l
+  min: 0
+  description: Liquid fuel consumed while the engine was idling, since the vehicle was built.
+  comment: Idle counterpart of FuelSystem.TotalConsumption, using the ECU's idle definition. Corresponds to J1939 SPN 236.
+           Consumers wanting one cross-OEM idle definition may instead derive it (see README). Rule (2).
+
+Vehicle.Powertrain.FuelSystem.TotalIdleConsumptionGaseous:
+  datatype: double
+  type: sensor
+  unit: kg
+  min: 0
+  description: Gaseous fuel consumed while the engine was idling, since the vehicle was built.
+  comment: Idle counterpart of FuelSystem.TotalConsumptionGaseous; covers CNG, LNG and H2. Rule (2).
+
+#
+# Bidirectional charging — FMD "AC / DC charging energy out"
+#
+Vehicle.Powertrain.TractionBattery.Charging.AccumulatedDischargedEnergy:
+  datatype: float
+  type: sensor
+  unit: kWh
+  min: 0
+  description: Energy delivered from the vehicle through the charging inlet to an external load or the grid (V2G, V2L),
+               over the lifetime of the vehicle.
+  comment: Measured at the inlet, so it differs from battery-side energy by conversion losses. Needed for grid
+           settlement and battery warranty. Rule (2).
+
+#
+# Tire monitoring — OEM partner TPMS malfunction warnings
+#
+Vehicle.Chassis.Axle.Row1.Wheel.Left.Tire.PressureStatus:
+  datatype: string
+  type: sensor
+  allowed: ['UNKNOWN', 'NORMAL', 'LOW', 'CRITICALLY_LOW', 'HIGH', 'FAST_LEAK', 'SENSOR_ERROR']
+  description: Tire pressure monitoring status for this tire.
+  comment: Determined by the TPMS. Fast leak needs closely spaced samples and sensor error cannot be derived from Pressure.
+           Upstream this would be added once in the Tire definition for all wheel instances (see open VSS PR 940 on wheel
+           designation). Rules (1), (3), (5).
+
+#
+# Battery cell temperature extremes — OEM partner max/min cell temperature index
+#
+Vehicle.Powertrain.TractionBattery.Temperature.IdMax:
+  datatype: uint16
+  type: sensor
+  description: Identifier of the battery cell with highest temperature.
+  comment: Identifier is supposed to be relative index of the cell, starting with 0 the first cell. Mirrors
+           CellVoltage.IdMax; avoids sending the full CellTemperature array to find one index. Rule (5).
+
+Vehicle.Powertrain.TractionBattery.Temperature.IdMin:
+  datatype: uint16
+  type: sensor
+  description: Identifier of the battery cell with lowest temperature.
+  comment: Identifier is supposed to be relative index of the cell, starting with 0 the first cell. Mirrors
+           CellVoltage.IdMin. Rule (5).
